@@ -1,0 +1,8 @@
+# Compiled binaries
+passgen
+main
+*.o
+*.out
+
+# macOS
+.DS_Store
