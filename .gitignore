@@ -1,8 +1,10 @@
 # Compiled binaries
-passgen
-main
+passman
 *.o
 *.out
+
+# Vault files (never commit secrets)
+*.vault
 
 # macOS
 .DS_Store

@@ -1,16 +1,50 @@
-# Secure Password Generator
+# passman — a CLI password manager for macOS
 
-A command-line password generator written in C for macOS. Passwords are built
-from cryptographically secure random bytes provided by Apple's Security
-framework (`SecRandomCopyBytes`), rather than `rand()` or other predictable
-sources.
+A password manager written in C with no dependencies beyond the macOS system
+SDK. Credentials are stored in a single encrypted vault file protected by a
+master password.
 
-## Features
+## Security design
 
-- Cryptographically secure randomness via the macOS Security framework
-- Configurable password length (defaults to 24 characters)
-- Character set covering lowercase, uppercase, digits, and symbols
-- No dependencies beyond the system SDK
+- **Key derivation** — PBKDF2-HMAC-SHA256 with 600,000 iterations and a
+  random 16-byte salt derives two independent 256-bit keys (one for
+  encryption, one for authentication) from the master password.
+- **Authenticated encryption** — the vault is encrypted with AES-256-CBC and
+  authenticated with HMAC-SHA256 in an encrypt-then-MAC construction. The
+  MAC covers the file header (magic, salt, IV) as well as the ciphertext,
+  and is verified with a constant-time comparison *before* any decryption is
+  attempted, so wrong passwords and tampered files are rejected without ever
+  touching the ciphertext.
+- **Randomness** — all random material (salts, IVs, generated passwords)
+  comes from `SecRandomCopyBytes`, the macOS CSPRNG.
+- **Unbiased password generation** — random bytes are mapped onto the
+  91-character set using rejection sampling: bytes that would wrap around
+  the charset unevenly are discarded, so every character is exactly equally
+  likely (a plain `byte % charset_size` would bias toward the first
+  characters of the set).
+- **Fresh salt and IV on every save** — the vault never reuses an IV, and a
+  key derived for one write is never reused for another.
+- **Memory hygiene** — master passwords, derived keys, and decrypted
+  plaintext are zeroed with `memset_s` (which the compiler may not optimize
+  away) as soon as they are no longer needed. Hidden input is read with
+  `readpassphrase(3)`, so secrets never echo to the terminal.
+- **Atomic writes** — saves go to a temp file (created with mode `0600`)
+  and are `rename(2)`d into place, so a crash mid-write cannot corrupt the
+  existing vault.
+
+### Vault file format
+
+```
+offset  size  field
+0       4     magic "PMV1"
+4       16    PBKDF2 salt
+20      16    AES-CBC IV
+36      32    HMAC-SHA256(mac_key, magic || salt || iv || ciphertext)
+68      N     AES-256-CBC ciphertext of the serialized entries
+```
+
+The plaintext is a count followed by length-prefixed name/username/password
+records, all little-endian, with strict bounds checking on parse.
 
 ## Build
 
@@ -20,34 +54,36 @@ Requires macOS with the Xcode Command Line Tools installed.
 make
 ```
 
-This produces a `passgen` binary. To compile manually:
-
-```sh
-clang -Wall -Wextra -O2 -o passgen main.c -framework Security
-```
-
 ## Usage
 
 ```sh
-# Generate a 24-character password (default)
-./passgen
-
-# Generate a password of a specific length
-./passgen 32
+passman init                   # create a new vault
+passman add github             # add an entry (prompts for the password)
+passman add aws -g 32          # add an entry with a generated 32-char password
+passman get github             # show an entry's username and password
+passman list                   # list entry names
+passman rm github              # delete an entry
+passman generate 24            # print a random password (no vault needed)
+passman change-master          # re-encrypt the vault under a new master password
 ```
 
-Example output:
+The vault lives at `~/.passman.vault` by default; set `PASSMAN_VAULT` to use
+a different path.
+
+## Project structure
 
 ```
-tR9!kQ{2x&Vm]pZ7@dLc#4Wn
+src/
+  main.c       CLI parsing, prompts, and command dispatch
+  vault.c/.h   vault file format, serialization, load/save, entry management
+  crypto.c/.h  key derivation, AES, HMAC, CSPRNG, constant-time compare
+  generator.c  rejection-sampled password generation
 ```
 
-## How it works
+## Limitations
 
-1. The requested number of random bytes is filled by
-   `SecRandomCopyBytes(kSecRandomDefault, ...)`, the same CSPRNG interface
-   used by system security features.
-2. Each byte is mapped onto a 92-character set of letters, digits, and
-   symbols.
-3. The buffer is freed and the password is printed to stdout, making it easy
-   to pipe into other tools (e.g. `./passgen | pbcopy`).
+This is a portfolio project, not a replacement for an audited password
+manager. Known limitations: secrets are printed to stdout (by design, for
+piping) and can end up in terminal scrollback; memory is not locked against
+swapping (`mlock`); and there is no protection against a compromised local
+machine, which no password manager can provide.
