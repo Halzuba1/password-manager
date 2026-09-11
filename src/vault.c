@@ -25,7 +25,6 @@
 #define HDR_LEN (MAGIC_LEN + SALT_LEN + IV_LEN)
 #define FILE_MIN (HDR_LEN + HMAC_LEN + 16)
 #define FILE_MAX (16u * 1024 * 1024)
-#define FIELD_MAX 4096
 
 static void put_u32(uint8_t *p, uint32_t v) {
     p[0] = (uint8_t)v;
@@ -62,7 +61,7 @@ static int parse_field(const uint8_t **p, size_t *remaining, char **out) {
     uint32_t len = get_u32(*p);
     *p += 4;
     *remaining -= 4;
-    if (len > FIELD_MAX || len > *remaining)
+    if (len > VAULT_FIELD_MAX || len > *remaining)
         return VAULT_ERR_FORMAT;
     char *s = malloc(len + 1);
     if (!s)
@@ -188,6 +187,12 @@ int vault_load(const char *path, const char *master, Vault *v) {
 
 int vault_save(const char *path, const char *master, const Vault *v) {
     size_t pt_len = serialized_size(v);
+    /* Refuse to write anything vault_load would reject. CBC with PKCS#7
+     * always adds 1-16 bytes of padding. */
+    if (v->count > UINT32_MAX ||
+        HDR_LEN + HMAC_LEN + (pt_len / 16 + 1) * 16 > FILE_MAX)
+        return VAULT_ERR_TOO_LARGE;
+
     uint8_t *pt = malloc(pt_len);
     if (!pt)
         return VAULT_ERR_MEM;
@@ -261,6 +266,10 @@ VaultEntry *vault_find(Vault *v, const char *name) {
 
 int vault_add(Vault *v, const char *name, const char *username,
               const char *password) {
+    if (strlen(name) > VAULT_FIELD_MAX || strlen(username) > VAULT_FIELD_MAX ||
+        strlen(password) > VAULT_FIELD_MAX)
+        return VAULT_ERR_TOO_LARGE;
+
     VaultEntry *grown = realloc(v->entries, (v->count + 1) * sizeof(VaultEntry));
     if (!grown)
         return VAULT_ERR_MEM;
@@ -320,6 +329,7 @@ const char *vault_strerror(int code) {
     case VAULT_ERR_AUTH:      return "authentication failed: wrong master password or vault was tampered with";
     case VAULT_ERR_CRYPTO:    return "cryptographic operation failed";
     case VAULT_ERR_MEM:       return "out of memory";
+    case VAULT_ERR_TOO_LARGE: return "entry or vault exceeds the maximum supported size";
     default:                  return "unknown error";
     }
 }

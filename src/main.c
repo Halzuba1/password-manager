@@ -29,6 +29,14 @@ static int read_secret(const char *prompt, char *buf, size_t cap) {
         fprintf(stderr, "Error: unable to read passphrase\n");
         return -1;
     }
+    /* readpassphrase silently truncates long input; a full buffer means the
+     * stored secret might not be what was typed. */
+    if (strlen(buf) == cap - 1) {
+        fprintf(stderr, "Error: passphrase must be shorter than %zu characters\n",
+                cap - 1);
+        secure_zero(buf, cap);
+        return -1;
+    }
     if (buf[0] == '\0') {
         fprintf(stderr, "Error: passphrase must not be empty\n");
         return -1;
@@ -59,6 +67,11 @@ static int read_line(const char *prompt, char *buf, size_t cap) {
      * cleanly with the hidden prompts (stdio's fgets would read ahead). */
     if (readpassphrase(prompt, buf, cap, RPP_ECHO_ON) == NULL) {
         fprintf(stderr, "Error: unable to read input\n");
+        return -1;
+    }
+    if (strlen(buf) == cap - 1) {
+        fprintf(stderr, "Error: input must be shorter than %zu characters\n",
+                cap - 1);
         return -1;
     }
     return 0;
@@ -119,6 +132,11 @@ static int cmd_add(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     const char *name = argv[0];
+    if (strlen(name) > VAULT_FIELD_MAX) {
+        fprintf(stderr, "Error: entry name is longer than %d bytes\n",
+                VAULT_FIELD_MAX);
+        return EXIT_FAILURE;
+    }
     int gen = 0;
     size_t gen_len = GEN_DEFAULT_LENGTH;
     if (argc >= 2) {

@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 
+/* Longest name, username, or password an entry may hold, in bytes. */
+#define VAULT_FIELD_MAX 4096
+
 enum {
     VAULT_OK = 0,
     VAULT_ERR_NOT_FOUND = -1, /* vault file does not exist */
@@ -11,6 +14,7 @@ enum {
     VAULT_ERR_AUTH = -4,      /* HMAC mismatch: wrong password or tampering */
     VAULT_ERR_CRYPTO = -5,    /* underlying crypto call failed */
     VAULT_ERR_MEM = -6,       /* allocation failure */
+    VAULT_ERR_TOO_LARGE = -7, /* field or vault exceeds the format's limits */
 };
 
 typedef struct {
