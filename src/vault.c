@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,6 +186,52 @@ int vault_load(const char *path, const char *master, Vault *v) {
     return rc;
 }
 
+static int write_all(int fd, const uint8_t *p, size_t len) {
+    while (len > 0) {
+        ssize_t n = write(fd, p, len);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        p += n;
+        len -= (size_t)n;
+    }
+    return 0;
+}
+
+/* Write data to a uniquely named temp file next to the vault, flush it to
+ * disk, then rename it over the vault. */
+static int write_file_atomic(const char *path, const uint8_t *data, size_t len) {
+    /* If the vault is a symlink (e.g. into a synced folder), replace the file
+     * it points to rather than the link itself. */
+    char resolved[PATH_MAX];
+    if (realpath(path, resolved) != NULL)
+        path = resolved;
+
+    char tmp[PATH_MAX];
+    if (snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path) >= (int)sizeof(tmp))
+        return VAULT_ERR_IO;
+
+    /* mkstemp creates a new file exclusively with mode 0600, so a leftover
+     * or planted file at the temp path is never written through. */
+    int fd = mkstemp(tmp);
+    if (fd < 0)
+        return VAULT_ERR_IO;
+
+    /* On macOS fsync does not flush the drive's write cache; F_FULLFSYNC
+     * does. Fall back to fsync on filesystems that don't support it. */
+    int ok = write_all(fd, data, len) == 0 &&
+             (fcntl(fd, F_FULLFSYNC) == 0 || fsync(fd) == 0);
+    if (close(fd) != 0)
+        ok = 0;
+    if (!ok || rename(tmp, path) != 0) {
+        unlink(tmp);
+        return VAULT_ERR_IO;
+    }
+    return VAULT_OK;
+}
+
 int vault_save(const char *path, const char *master, const Vault *v) {
     size_t pt_len = serialized_size(v);
     /* Refuse to write anything vault_load would reject. CBC with PKCS#7
@@ -235,20 +282,8 @@ int vault_save(const char *path, const char *master, const Vault *v) {
     secure_zero(pt, pt_len);
     free(pt);
 
-    if (rc == VAULT_OK) {
-        char tmp[1024];
-        snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-        int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-        size_t file_len = HDR_LEN + HMAC_LEN + ct_len;
-        if (fd < 0 ||
-            write(fd, out, file_len) != (ssize_t)file_len ||
-            close(fd) != 0 ||
-            rename(tmp, path) != 0) {
-            if (fd >= 0)
-                unlink(tmp);
-            rc = VAULT_ERR_IO;
-        }
-    }
+    if (rc == VAULT_OK)
+        rc = write_file_atomic(path, out, HDR_LEN + HMAC_LEN + ct_len);
 
     secure_zero(enc_key, sizeof(enc_key));
     secure_zero(mac_key, sizeof(mac_key));

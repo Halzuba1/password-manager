@@ -28,9 +28,11 @@ master password.
   plaintext are zeroed with `memset_s` (which the compiler may not optimize
   away) as soon as they are no longer needed. Hidden input is read with
   `readpassphrase(3)`, so secrets never echo to the terminal.
-- **Atomic writes** — saves go to a temp file (created with mode `0600`)
-  and are `rename(2)`d into place, so a crash mid-write cannot corrupt the
-  existing vault.
+- **Atomic, durable writes** — saves go to a uniquely named temp file
+  (created exclusively with mode `0600` by `mkstemp(3)`), are flushed to
+  disk with `F_FULLFSYNC`, and are then `rename(2)`d into place, so a crash
+  or power loss mid-write cannot corrupt the existing vault. If the vault
+  path is a symlink, the file it points to is updated and the link is kept.
 
 ### Vault file format
 
