@@ -60,6 +60,18 @@ Requires macOS with the Xcode Command Line Tools installed.
 make
 ```
 
+## Tests
+
+```sh
+make test
+```
+
+The tests exercise the vault code directly: round-tripping and tamper
+detection, the format's size limits, never replacing an existing vault on
+`init`, temp-file handling during saves, locking, and symlinked vault paths.
+They take several seconds, since every save and load runs the full key
+derivation.
+
 ## Usage
 
 ```sh
@@ -84,6 +96,8 @@ src/
   vault.c/.h   vault file format, serialization, load/save, entry management
   crypto.c/.h  key derivation, AES, HMAC, CSPRNG, constant-time compare
   generator.c  rejection-sampled password generation
+tests/
+  vault_test.c regression tests for the vault code (`make test`)
 ```
 
 ## Limitations

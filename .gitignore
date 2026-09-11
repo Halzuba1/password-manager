@@ -1,5 +1,6 @@
 # Compiled binaries
 passman
+tests/vault_test
 *.o
 *.out
 
