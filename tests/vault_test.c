@@ -422,6 +422,31 @@ static void test_symlinked_vault(void) {
     vault_free(&loaded);
 }
 
+/* After renaming, save flushes the directory so the rename survives a power
+ * loss. That flush is best effort: a directory that is writable but not
+ * readable can't be opened to flush, and saving there must still work. */
+static void test_save_in_unreadable_directory(void) {
+    const char *dir = "unreadable";
+    const char *path = "unreadable/entries.vault";
+    if (mkdir(dir, 0700) != 0)
+        die("mkdir");
+    chmod(dir, 0300);
+
+    Vault v = {0};
+    add_or_die(&v, "name", "user", "pass");
+    CHECK(vault_create(path, MASTER) == VAULT_OK,
+          "create in a directory that can't be read");
+    CHECK(vault_save(path, MASTER, &v) == VAULT_OK,
+          "save in a directory that can't be read");
+    vault_free(&v);
+    Vault loaded;
+    CHECK(vault_load(path, MASTER, &loaded) == VAULT_OK && loaded.count == 1,
+          "vault in a directory that can't be read loads back");
+    vault_free(&loaded);
+
+    chmod(dir, 0700); /* so the test directory can be removed */
+}
+
 static int remove_entry(const char *path, const struct stat *st, int type,
                         struct FTW *ftw) {
     (void)st, (void)type, (void)ftw;
@@ -443,6 +468,7 @@ int main(void) {
     test_save_temp_file();
     test_lock();
     test_symlinked_vault();
+    test_save_in_unreadable_directory();
 
     if (failures == 0) {
         printf("\nall tests passed\n");

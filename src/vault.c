@@ -202,9 +202,31 @@ static int write_all(int fd, const uint8_t *p, size_t len) {
     return 0;
 }
 
+/* Flush the directory containing path to disk. A rename is a change to the
+ * directory, and until that is flushed a power loss can undo it and bring
+ * back the old file. */
+static void sync_parent_dir(const char *path) {
+    char dir[PATH_MAX];
+    const char *slash = strrchr(path, '/');
+    if (!slash)
+        strcpy(dir, ".");
+    else if (slash == path)
+        strcpy(dir, "/");
+    else if (snprintf(dir, sizeof(dir), "%.*s", (int)(slash - path), path) >=
+             (int)sizeof(dir))
+        return;
+
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    if (fcntl(fd, F_FULLFSYNC) != 0)
+        fsync(fd);
+    close(fd);
+}
+
 /* Write data to a uniquely named temp file next to the vault, flush it to
- * disk, then rename it over the vault. With exclusive set, the rename fails
- * instead of replacing an existing file. */
+ * disk, rename it over the vault, then flush the directory. With exclusive
+ * set, the rename fails instead of replacing an existing file. */
 static int write_file_atomic(const char *path, const uint8_t *data, size_t len,
                              int exclusive) {
     /* If the vault is a symlink (e.g. into a synced folder), replace the file
@@ -240,6 +262,11 @@ static int write_file_atomic(const char *path, const uint8_t *data, size_t len,
         unlink(tmp);
         return err == EEXIST ? VAULT_ERR_EXISTS : VAULT_ERR_IO;
     }
+
+    /* Best effort: the new vault is already in place, so failing here would
+     * report a change as lost when it wasn't. A directory can also be
+     * writable without being readable, and then it can't be opened. */
+    sync_parent_dir(path);
     return VAULT_OK;
 }
 

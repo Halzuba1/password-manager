@@ -31,8 +31,10 @@ master password.
 - **Atomic, durable writes** — saves go to a uniquely named temp file
   (created exclusively with mode `0600` by `mkstemp(3)`), are flushed to
   disk with `F_FULLFSYNC`, and are then `rename(2)`d into place, so a crash
-  or power loss mid-write cannot corrupt the existing vault. If the vault
-  path is a symlink, the file it points to is updated and the link is kept.
+  or power loss mid-write cannot corrupt the existing vault. The directory
+  is flushed after the rename too (when it can be opened), so a save that
+  has reported success isn't rolled back by a power loss. If the vault path
+  is a symlink, the file it points to is updated and the link is kept.
 - **Locking** — commands that modify the vault (`add`, `rm`,
   `change-master`) hold an exclusive `flock(2)` from load to save. A second
   one started meanwhile exits with an error instead of silently discarding
