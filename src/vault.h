@@ -15,6 +15,7 @@ enum {
     VAULT_ERR_CRYPTO = -5,    /* underlying crypto call failed */
     VAULT_ERR_MEM = -6,       /* allocation failure */
     VAULT_ERR_TOO_LARGE = -7, /* field or vault exceeds the format's limits */
+    VAULT_ERR_EXISTS = -8,    /* vault_create target already exists */
 };
 
 typedef struct {
@@ -35,6 +36,11 @@ int vault_load(const char *path, const char *master, Vault *v);
 /* Encrypt and atomically write the vault. A fresh salt and IV are generated
  * on every save. Returns a VAULT_* code. */
 int vault_save(const char *path, const char *master, const Vault *v);
+
+/* Write a new empty vault. Fails with VAULT_ERR_EXISTS rather than replacing
+ * anything already at path, even if it was created after the caller last
+ * checked. */
+int vault_create(const char *path, const char *master);
 
 VaultEntry *vault_find(Vault *v, const char *name);
 int vault_add(Vault *v, const char *name, const char *username,

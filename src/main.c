@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <readpassphrase.h>
+#include <unistd.h>
 
 #include "crypto.h"
 #include "generator.h"
@@ -104,9 +105,9 @@ static int open_vault(Vault *v, char *master, size_t master_cap) {
 }
 
 static int cmd_init(void) {
-    FILE *f = fopen(vault_path(), "rb");
-    if (f) {
-        fclose(f);
+    /* Only a courtesy check to skip the password prompt. vault_create is what
+     * actually guarantees an existing vault is never replaced. */
+    if (access(vault_path(), F_OK) == 0) {
         fprintf(stderr, "Error: vault already exists at %s\n", vault_path());
         return EXIT_FAILURE;
     }
@@ -115,8 +116,7 @@ static int cmd_init(void) {
     if (read_secret_confirmed("New master password: ", master, sizeof(master)) != 0)
         return EXIT_FAILURE;
 
-    Vault v = {0};
-    int rc = vault_save(vault_path(), master, &v);
+    int rc = vault_create(vault_path(), master);
     secure_zero(master, sizeof(master));
     if (rc != VAULT_OK) {
         fprintf(stderr, "Error: %s\n", vault_strerror(rc));

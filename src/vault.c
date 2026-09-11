@@ -201,8 +201,10 @@ static int write_all(int fd, const uint8_t *p, size_t len) {
 }
 
 /* Write data to a uniquely named temp file next to the vault, flush it to
- * disk, then rename it over the vault. */
-static int write_file_atomic(const char *path, const uint8_t *data, size_t len) {
+ * disk, then rename it over the vault. With exclusive set, the rename fails
+ * instead of replacing an existing file. */
+static int write_file_atomic(const char *path, const uint8_t *data, size_t len,
+                             int exclusive) {
     /* If the vault is a symlink (e.g. into a synced folder), replace the file
      * it points to rather than the link itself. */
     char resolved[PATH_MAX];
@@ -225,14 +227,22 @@ static int write_file_atomic(const char *path, const uint8_t *data, size_t len) 
              (fcntl(fd, F_FULLFSYNC) == 0 || fsync(fd) == 0);
     if (close(fd) != 0)
         ok = 0;
-    if (!ok || rename(tmp, path) != 0) {
+    if (!ok) {
         unlink(tmp);
         return VAULT_ERR_IO;
+    }
+    int moved = exclusive ? renamex_np(tmp, path, RENAME_EXCL)
+                          : rename(tmp, path);
+    if (moved != 0) {
+        int err = errno;
+        unlink(tmp);
+        return err == EEXIST ? VAULT_ERR_EXISTS : VAULT_ERR_IO;
     }
     return VAULT_OK;
 }
 
-int vault_save(const char *path, const char *master, const Vault *v) {
+static int save(const char *path, const char *master, const Vault *v,
+                int exclusive) {
     size_t pt_len = serialized_size(v);
     /* Refuse to write anything vault_load would reject. CBC with PKCS#7
      * always adds 1-16 bytes of padding. */
@@ -283,12 +293,22 @@ int vault_save(const char *path, const char *master, const Vault *v) {
     free(pt);
 
     if (rc == VAULT_OK)
-        rc = write_file_atomic(path, out, HDR_LEN + HMAC_LEN + ct_len);
+        rc = write_file_atomic(path, out, HDR_LEN + HMAC_LEN + ct_len,
+                               exclusive);
 
     secure_zero(enc_key, sizeof(enc_key));
     secure_zero(mac_key, sizeof(mac_key));
     free(out);
     return rc;
+}
+
+int vault_save(const char *path, const char *master, const Vault *v) {
+    return save(path, master, v, 0);
+}
+
+int vault_create(const char *path, const char *master) {
+    Vault empty = {0};
+    return save(path, master, &empty, 1);
 }
 
 VaultEntry *vault_find(Vault *v, const char *name) {
@@ -365,6 +385,7 @@ const char *vault_strerror(int code) {
     case VAULT_ERR_CRYPTO:    return "cryptographic operation failed";
     case VAULT_ERR_MEM:       return "out of memory";
     case VAULT_ERR_TOO_LARGE: return "entry or vault exceeds the maximum supported size";
+    case VAULT_ERR_EXISTS:    return "a vault already exists at that path";
     default:                  return "unknown error";
     }
 }
