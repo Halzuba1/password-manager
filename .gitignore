@@ -4,8 +4,10 @@ tests/vault_test
 *.o
 *.out
 
-# Vault files (never commit secrets)
+# Vault files (never commit secrets), including the temp file a save leaves
+# behind if it is killed before renaming it into place
 *.vault
+*.vault.??????
 
 # macOS
 .DS_Store
