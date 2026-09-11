@@ -16,6 +16,7 @@ enum {
     VAULT_ERR_MEM = -6,       /* allocation failure */
     VAULT_ERR_TOO_LARGE = -7, /* field or vault exceeds the format's limits */
     VAULT_ERR_EXISTS = -8,    /* vault_create target already exists */
+    VAULT_ERR_LOCKED = -9,    /* another process holds the vault lock */
 };
 
 typedef struct {
@@ -41,6 +42,13 @@ int vault_save(const char *path, const char *master, const Vault *v);
  * anything already at path, even if it was created after the caller last
  * checked. */
 int vault_create(const char *path, const char *master);
+
+/* Take an exclusive lock on the vault without blocking, so a load/modify/save
+ * sequence can't interleave with another process doing the same. On success
+ * stores a descriptor in *fd that must be passed to vault_unlock once the
+ * save is done. Returns VAULT_ERR_LOCKED if the vault is already in use. */
+int vault_lock(const char *path, int *fd);
+void vault_unlock(int fd);
 
 VaultEntry *vault_find(Vault *v, const char *name);
 int vault_add(Vault *v, const char *name, const char *username,

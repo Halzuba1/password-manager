@@ -33,6 +33,10 @@ master password.
   disk with `F_FULLFSYNC`, and are then `rename(2)`d into place, so a crash
   or power loss mid-write cannot corrupt the existing vault. If the vault
   path is a symlink, the file it points to is updated and the link is kept.
+- **Locking** — commands that modify the vault (`add`, `rm`,
+  `change-master`) hold an exclusive `flock(2)` from load to save. A second
+  one started meanwhile exits with an error instead of silently discarding
+  the first one's changes.
 
 ### Vault file format
 

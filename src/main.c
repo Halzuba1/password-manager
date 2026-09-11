@@ -91,14 +91,28 @@ static int parse_length(const char *arg, size_t *out) {
 }
 
 /* Load the vault after prompting for the master password. On success the
- * master password is left in `master` for a follow-up save. */
-static int open_vault(Vault *v, char *master, size_t master_cap) {
-    if (read_secret("Master password: ", master, master_cap) != 0)
+ * master password is left in `master` for a follow-up save.
+ *
+ * Commands that save pass lock_fd: the vault is locked before the prompt (so
+ * a busy vault fails before asking for a password) and stays locked until the
+ * caller calls vault_unlock. Read-only commands pass NULL. */
+static int open_vault(Vault *v, char *master, size_t master_cap, int *lock_fd) {
+    int rc;
+    if (lock_fd && (rc = vault_lock(vault_path(), lock_fd)) != VAULT_OK) {
+        fprintf(stderr, "Error: %s\n", vault_strerror(rc));
         return -1;
-    int rc = vault_load(vault_path(), master, v);
+    }
+    if (read_secret("Master password: ", master, master_cap) != 0) {
+        if (lock_fd)
+            vault_unlock(*lock_fd);
+        return -1;
+    }
+    rc = vault_load(vault_path(), master, v);
     if (rc != VAULT_OK) {
         fprintf(stderr, "Error: %s\n", vault_strerror(rc));
         secure_zero(master, master_cap);
+        if (lock_fd)
+            vault_unlock(*lock_fd);
         return -1;
     }
     return 0;
@@ -151,7 +165,8 @@ static int cmd_add(int argc, char *argv[]) {
 
     char master[MASTER_MAX];
     Vault v;
-    if (open_vault(&v, master, sizeof(master)) != 0)
+    int lock_fd;
+    if (open_vault(&v, master, sizeof(master), &lock_fd) != 0)
         return EXIT_FAILURE;
 
     int status = EXIT_FAILURE;
@@ -190,6 +205,7 @@ static int cmd_add(int argc, char *argv[]) {
 out:
     secure_zero(master, sizeof(master));
     vault_free(&v);
+    vault_unlock(lock_fd);
     return status;
 }
 
@@ -201,7 +217,7 @@ static int cmd_get(int argc, char *argv[]) {
 
     char master[MASTER_MAX];
     Vault v;
-    if (open_vault(&v, master, sizeof(master)) != 0)
+    if (open_vault(&v, master, sizeof(master), NULL) != 0)
         return EXIT_FAILURE;
     secure_zero(master, sizeof(master));
 
@@ -220,7 +236,7 @@ static int cmd_get(int argc, char *argv[]) {
 static int cmd_list(void) {
     char master[MASTER_MAX];
     Vault v;
-    if (open_vault(&v, master, sizeof(master)) != 0)
+    if (open_vault(&v, master, sizeof(master), NULL) != 0)
         return EXIT_FAILURE;
     secure_zero(master, sizeof(master));
 
@@ -240,7 +256,8 @@ static int cmd_rm(int argc, char *argv[]) {
 
     char master[MASTER_MAX];
     Vault v;
-    if (open_vault(&v, master, sizeof(master)) != 0)
+    int lock_fd;
+    if (open_vault(&v, master, sizeof(master), &lock_fd) != 0)
         return EXIT_FAILURE;
 
     int status = EXIT_FAILURE;
@@ -256,6 +273,7 @@ static int cmd_rm(int argc, char *argv[]) {
 
     secure_zero(master, sizeof(master));
     vault_free(&v);
+    vault_unlock(lock_fd);
     return status;
 }
 
@@ -277,7 +295,8 @@ static int cmd_generate(int argc, char *argv[]) {
 static int cmd_change_master(void) {
     char master[MASTER_MAX];
     Vault v;
-    if (open_vault(&v, master, sizeof(master)) != 0)
+    int lock_fd;
+    if (open_vault(&v, master, sizeof(master), &lock_fd) != 0)
         return EXIT_FAILURE;
     secure_zero(master, sizeof(master));
 
@@ -295,6 +314,7 @@ static int cmd_change_master(void) {
         }
     }
     vault_free(&v);
+    vault_unlock(lock_fd);
     return status;
 }
 

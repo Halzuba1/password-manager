@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* File layout:
@@ -311,6 +313,34 @@ int vault_create(const char *path, const char *master) {
     return save(path, master, &empty, 1);
 }
 
+int vault_lock(const char *path, int *fd) {
+    for (;;) {
+        int lfd = open(path, O_RDONLY | O_CLOEXEC);
+        if (lfd < 0)
+            return errno == ENOENT ? VAULT_ERR_NOT_FOUND : VAULT_ERR_IO;
+        if (flock(lfd, LOCK_EX | LOCK_NB) != 0) {
+            int err = errno;
+            close(lfd);
+            return err == EWOULDBLOCK ? VAULT_ERR_LOCKED : VAULT_ERR_IO;
+        }
+
+        /* Saves rename a new file over the vault, so the file we opened may
+         * already have been replaced by the time we got the lock. Only keep
+         * the lock if it's on the file currently at path. */
+        struct stat held, current;
+        if (fstat(lfd, &held) == 0 && stat(path, &current) == 0 &&
+            held.st_dev == current.st_dev && held.st_ino == current.st_ino) {
+            *fd = lfd;
+            return VAULT_OK;
+        }
+        close(lfd);
+    }
+}
+
+void vault_unlock(int fd) {
+    close(fd);
+}
+
 VaultEntry *vault_find(Vault *v, const char *name) {
     for (size_t i = 0; i < v->count; i++) {
         if (strcmp(v->entries[i].name, name) == 0)
@@ -386,6 +416,7 @@ const char *vault_strerror(int code) {
     case VAULT_ERR_MEM:       return "out of memory";
     case VAULT_ERR_TOO_LARGE: return "entry or vault exceeds the maximum supported size";
     case VAULT_ERR_EXISTS:    return "a vault already exists at that path";
+    case VAULT_ERR_LOCKED:    return "vault is in use by another passman process";
     default:                  return "unknown error";
     }
 }
